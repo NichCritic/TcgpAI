@@ -71,52 +71,178 @@ This document outlines a comprehensive step-by-step plan for creating a model-ba
 }
 ```
 
-## Phase 2: Advanced Card Embeddings for RL
+## Phase 2: Unified Card-State Embedding Architecture
 
-### Step 4: RL-Focused Feature Engineering
-1. **Strategic Value Features**:
-   - Card power level in current meta
-   - Synergy with available cards
-   - Situational effectiveness
-   - Resource cost vs. impact ratio
+### Step 4: Integrated Card-World Representation System
+The core innovation is treating cards not as static entities, but as dynamic components whose representations depend on the complete game context.
 
-2. **Game State Context Features**:
-   - Turn timing relevance
-   - Board state dependencies
-   - Hand size considerations
-   - Energy availability
-
-3. **Opponent Modeling Features**:
-   - Counter-play potential
-   - Deck archetype indicators
-   - Threat assessment values
-
-### Step 5: Contextual Card Embeddings
 ```python
-class ContextualCardEmbedding(nn.Module):
+class UnifiedCardStateEncoder(nn.Module):
     def __init__(self, config):
         super().__init__()
-        self.base_card_encoder = CardEmbeddingModel(config)
-        self.context_encoder = GameStateEncoder(config)
-        self.contextual_fusion = ContextualAttention(config)
         
-    def forward(self, card_data, game_state):
-        # Base card features
-        card_embed = self.base_card_encoder(card_data)
+        # Base card encoder (static properties)
+        self.base_card_encoder = BaseCardEncoder(config)
         
-        # Game state context
-        context_embed = self.context_encoder(game_state)
+        # Dynamic state-aware components
+        self.positional_encoder = PositionalEncoder(config)  # Where card is (hand, field, deck)
+        self.temporal_encoder = TemporalEncoder(config)      # When in game
+        self.relational_encoder = RelationalEncoder(config)  # Relationships to other cards
+        self.strategic_encoder = StrategicEncoder(config)    # Strategic context
         
-        # Contextual card representation
-        contextual_embed = self.contextual_fusion(card_embed, context_embed)
+        # Cross-attention for card-state fusion
+        self.card_state_attention = nn.MultiheadAttention(config.hidden_dim, config.num_heads)
         
-        return contextual_embed
+        # Final unified representation
+        self.unified_projector = nn.Sequential(
+            nn.Linear(config.total_dim, config.hidden_dim),
+            nn.LayerNorm(config.hidden_dim),
+            nn.ReLU(),
+            nn.Linear(config.hidden_dim, config.embed_dim)
+        )
+    
+    def forward(self, cards, game_state, player_perspective):
+        batch_size = len(cards)
+        
+        # 1. Base card features (intrinsic properties)
+        base_embeddings = self.base_card_encoder(cards)  # [num_cards, base_dim]
+        
+        # 2. Positional context (where each card is)
+        positions = self.extract_card_positions(cards, game_state)
+        pos_embeddings = self.positional_encoder(positions)
+        
+        # 3. Temporal context (game phase, turn timing)
+        temporal_context = self.extract_temporal_context(game_state)
+        temp_embeddings = self.temporal_encoder(temporal_context)
+        
+        # 4. Relational context (synergies, counters, combos)
+        relations = self.compute_card_relations(cards, game_state)
+        rel_embeddings = self.relational_encoder(relations)
+        
+        # 5. Strategic context (game plan, resources, threats)
+        strategic_context = self.extract_strategic_context(game_state, player_perspective)
+        strat_embeddings = self.strategic_encoder(strategic_context)
+        
+        # 6. Cross-attention fusion
+        # Each card attends to global game state
+        game_state_vector = self.encode_global_state(game_state)
+        attended_cards, attention_weights = self.card_state_attention(
+            base_embeddings,  # Query: cards
+            game_state_vector.unsqueeze(0).expand(len(cards), -1, -1),  # Key/Value: state
+            game_state_vector.unsqueeze(0).expand(len(cards), -1, -1)
+        )
+        
+        # 7. Combine all representations
+        combined = torch.cat([
+            attended_cards,
+            pos_embeddings,
+            temp_embeddings,
+            rel_embeddings,
+            strat_embeddings
+        ], dim=-1)
+        
+        # 8. Final unified card-state embeddings
+        unified_embeddings = self.unified_projector(combined)
+        
+        return unified_embeddings, attention_weights
 ```
 
-### Step 6: Multi-Scale Temporal Embeddings
-- **Immediate Impact**: Next 1-2 turns
-- **Medium-term Strategy**: 3-5 turns ahead
-- **Long-term Game Plan**: Full game trajectory
+### Step 5: Multi-Level State Representation
+```python
+class HierarchicalGameStateEncoder(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        
+        # Card-level representations
+        self.card_state_encoder = UnifiedCardStateEncoder(config)
+        
+        # Zone-level aggregation (hand, field, deck, discard)
+        self.zone_encoder = ZoneEncoder(config)
+        
+        # Player-level state
+        self.player_encoder = PlayerStateEncoder(config)
+        
+        # Game-level meta information
+        self.game_meta_encoder = GameMetaEncoder(config)
+        
+        # Hierarchical fusion
+        self.hierarchical_fusion = HierarchicalAttention(config)
+    
+    def forward(self, game_state):
+        # 1. Encode all cards with full context
+        all_cards = self.extract_all_cards(game_state)
+        card_embeddings, card_attention = self.card_state_encoder(
+            all_cards, game_state, player_perspective='self'
+        )
+        
+        # 2. Aggregate cards by zones
+        zone_embeddings = self.zone_encoder(card_embeddings, game_state.zone_assignments)
+        
+        # 3. Player state representation
+        player_embeddings = self.player_encoder(
+            zone_embeddings, 
+            game_state.player_resources,
+            game_state.player_status
+        )
+        
+        # 4. Game meta information
+        meta_embeddings = self.game_meta_encoder(
+            game_state.turn_info,
+            game_state.phase_info,
+            game_state.history_summary
+        )
+        
+        # 5. Hierarchical fusion
+        unified_state = self.hierarchical_fusion(
+            card_embeddings,    # Finest granularity
+            zone_embeddings,    # Medium granularity  
+            player_embeddings,  # Coarse granularity
+            meta_embeddings     # Global context
+        )
+        
+        return unified_state, {
+            'cards': card_embeddings,
+            'zones': zone_embeddings,
+            'players': player_embeddings,
+            'meta': meta_embeddings,
+            'attention': card_attention
+        }
+```
+
+### Step 6: Dynamic Card Value Assessment
+```python
+class DynamicCardValuePredictor(nn.Module):
+    def __init__(self, config):
+        super().__init__()
+        self.card_state_encoder = UnifiedCardStateEncoder(config)
+        
+        # Multiple value heads for different aspects
+        self.immediate_value = nn.Linear(config.embed_dim, 1)    # Next 1-2 turns
+        self.tactical_value = nn.Linear(config.embed_dim, 1)     # 3-5 turns
+        self.strategic_value = nn.Linear(config.embed_dim, 1)    # Long-term
+        self.utility_value = nn.Linear(config.embed_dim, 1)      # Overall utility
+        
+        # Uncertainty estimation
+        self.value_uncertainty = nn.Linear(config.embed_dim, 4)  # One per value type
+    
+    def forward(self, cards, game_state):
+        # Get unified card representations
+        card_embeddings, _ = self.card_state_encoder(cards, game_state, 'self')
+        
+        # Predict multiple value dimensions
+        values = {
+            'immediate': self.immediate_value(card_embeddings),
+            'tactical': self.tactical_value(card_embeddings),
+            'strategic': self.strategic_value(card_embeddings),
+            'utility': self.utility_value(card_embeddings)
+        }
+        
+        # Estimate uncertainty for each value
+        uncertainties = self.value_uncertainty(card_embeddings)
+        uncertainties = torch.softplus(uncertainties)  # Ensure positive
+        
+        return values, uncertainties
+```
 
 ## Phase 3: World Model Architecture
 
